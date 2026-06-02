@@ -1,0 +1,48 @@
+# ---- Build artifacts ----
+build/
+dist/
+*.egg-info/
+_skbuild/
+*.so
+*.pyd
+*.dll
+*.dylib
+*.o
+*.obj
+*.a
+*.lib
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+pytest-cache-files-*
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- Simulation / benchmark output ----
+# Binary stream snapshots and derived media are reproducible; never commit them.
+*.bfs
+*.bfx
+out/
+runs/
+benchmarks/results/
+*.mp4
+*.png
+!docs/**/*.png
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+CLAUDE.md

@@ -1,0 +1,61 @@
+[build-system]
+# CMake-driven build of the CPython C extension (raw CPython C-API, no binding
+# libraries). scikit-build-core bridges PEP 517 -> CMake so `pip install -e .`
+# configures and builds native/ transparently.
+requires = ["scikit-build-core>=0.8", "numpy>=1.24"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "boidforge"
+version = "0.1.0"
+description = "High-performance 2D Boids simulation solver and decoupled replay/visualization engine."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Valentin" }]
+keywords = ["boids", "simulation", "hpc", "benchmark", "opengl", "visualization"]
+
+# Runtime deps are intentionally minimal and split by concern. The solver needs
+# only NumPy; visualization/benchmark deps are optional extras so that headless
+# compute nodes never pull in OpenGL.
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+viz = ["moderngl>=5.8", "pyglet>=2.0"]
+bench = ["matplotlib>=3.7"]
+dev = ["pytest>=7.4", "ruff>=0.4", "mypy>=1.8"]
+all = ["boidforge[viz,bench,dev]"]
+
+[project.scripts]
+boidforge-simulate = "boidforge.cli:simulate_main"
+boidforge-benchmark = "boidforge.cli:benchmark_main"
+boidforge-replay = "boidforge.cli:replay_main"
+
+[tool.scikit-build]
+# The C extension lands inside the importable package as boidforge._native.
+wheel.packages = ["src/boidforge"]
+cmake.version = ">=3.18"
+cmake.build-type = "Release"
+build-dir = "build/{wheel_tag}"
+
+[tool.scikit-build.cmake.define]
+BOIDFORGE_BUILD_EXTENSION = "ON"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "D", "UP", "B"]
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
