@@ -59,3 +59,10 @@ convention = "google"
 [tool.mypy]
 python_version = "3.10"
 strict = true
+
+# ModernGL and pyglet are the visualization-only GPU dependencies; they ship
+# little/no type information. Confine the relaxation to those imports so the
+# rest of the codebase stays strict.
+[[tool.mypy.overrides]]
+module = ["moderngl", "moderngl.*", "pyglet", "pyglet.*"]
+ignore_missing_imports = true

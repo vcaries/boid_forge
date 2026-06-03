@@ -37,9 +37,7 @@ def simulate_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("-s", "--steps", type=int, default=300)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dt", type=float, default=0.05)
-    parser.add_argument(
-        "--boundary", default="wrap", choices=[m.value for m in BoundaryMode]
-    )
+    parser.add_argument("--boundary", default="wrap", choices=[m.value for m in BoundaryMode])
     parser.add_argument("--world-width", type=float, default=1920.0)
     parser.add_argument("--world-height", type=float, default=1080.0)
     parser.add_argument("-o", "--out", required=True, help="Destination .bfs path.")
@@ -56,10 +54,7 @@ def simulate_main(argv: Sequence[str] | None = None) -> int:
     )
     solver = SOLVERS[args.backend](cfg)
     frames = solver.run(args.out)
-    print(
-        f"{args.backend}: wrote {frames} frames "
-        f"(N={cfg.n_boids}, seed={cfg.seed}) -> {args.out}"
-    )
+    print(f"{args.backend}: wrote {frames} frames (N={cfg.n_boids}, seed={cfg.seed}) -> {args.out}")
     return 0
 
 
@@ -79,12 +74,8 @@ def benchmark_main(argv: Sequence[str] | None = None) -> int:
         prog="boidforge-benchmark",
         description="Sweep backends × boid counts and export timings + plots.",
     )
-    parser.add_argument(
-        "--backends", nargs="+", default=sorted(SOLVERS), choices=sorted(SOLVERS)
-    )
-    parser.add_argument(
-        "-n", "--boids", nargs="+", type=int, default=[100, 200, 500, 1000, 2000]
-    )
+    parser.add_argument("--backends", nargs="+", default=sorted(SOLVERS), choices=sorted(SOLVERS))
+    parser.add_argument("-n", "--boids", nargs="+", type=int, default=[100, 200, 500, 1000, 2000])
     parser.add_argument("-s", "--steps", type=int, default=200)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
@@ -116,8 +107,7 @@ def benchmark_main(argv: Sequence[str] | None = None) -> int:
 
     for r in results:
         print(
-            f"  {r.backend:>16}  N={r.n_boids:<7} "
-            f"{r.ms_per_frame:8.3f} ms/frame  {r.fps:8.1f} fps"
+            f"  {r.backend:>16}  N={r.n_boids:<7} {r.ms_per_frame:8.3f} ms/frame  {r.fps:8.1f} fps"
         )
 
     if not args.no_plots:
@@ -142,4 +132,44 @@ def replay_main(argv: Sequence[str] | None = None) -> int:
     Returns:
         Process exit code.
     """
-    raise NotImplementedError
+    from boidforge.viz.colormaps import available
+    from boidforge.viz.replay import ReplayConfig, ReplayEngine
+
+    parser = argparse.ArgumentParser(
+        prog="boidforge-replay",
+        description="Replay a .bfs stream interactively or render it to video.",
+    )
+    parser.add_argument("stream", help="Source .bfs file to replay.")
+    parser.add_argument(
+        "-o", "--export", default=None, help="Render offscreen to this video file (needs ffmpeg)."
+    )
+    parser.add_argument("--fps", type=int, default=60, help="Playback/export frame rate.")
+    parser.add_argument("--width", type=int, default=1600)
+    parser.add_argument("--height", type=int, default=900)
+    parser.add_argument("--colormap", default="turbo", choices=sorted(available()))
+    parser.add_argument("--color-mode", default="speed", choices=["speed", "heading", "uniform"])
+    parser.add_argument("--crf", type=int, default=18, help="x264 quality (lower = better).")
+    parser.add_argument("--max-frames", type=int, default=0, help="Cap frames decoded (0 = all).")
+    parser.add_argument("--no-loop", action="store_true", help="Do not loop in interactive mode.")
+    parser.add_argument(
+        "--no-auto-speed", action="store_true", help="Disable colour speed auto-calibration."
+    )
+    args = parser.parse_args(argv)
+
+    cfg = ReplayConfig(
+        fps=args.fps,
+        loop=not args.no_loop,
+        export_path=args.export,
+        width=args.width,
+        height=args.height,
+        colormap=args.colormap,
+        color_mode=args.color_mode,
+        crf=args.crf,
+        max_frames=args.max_frames,
+        auto_speed=not args.no_auto_speed,
+    )
+    engine = ReplayEngine(args.stream, cfg)
+    engine.run()
+    if args.export:
+        print(f"Rendered {args.stream} -> {args.export}")
+    return 0

@@ -1,16 +1,25 @@
 """Replay engine: drive playback of a ``.bfs`` stream through the renderer.
 
 The engine is the visualization entry point. It opens a stream with
-:class:`~boidforge.io.reader.FrameReader`, reads frames sequentially, updates the
-:class:`~boidforge.viz.camera.Camera`, and submits each frame to the
-:class:`~boidforge.viz.renderer.Renderer` — optionally capturing to a
+:class:`~boidforge.io.reader.FrameReader`, decodes frames, and either launches an
+interactive tunable window (:class:`~boidforge.viz.app.InteractiveApp`) or
+renders the sequence offscreen to a video via
 :class:`~boidforge.viz.video.VideoExporter`. It performs no simulation.
+
+Frames are decoded into memory so the interactive player can scrub freely and so
+the camera can be auto-framed from the data (the ``.bfs`` header records no world
+extent). For very large streams use :attr:`ReplayConfig.max_frames` to cap it.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from boidforge.io.reader import Frame, FrameReader
+from boidforge.viz.renderer import ColorMode, RenderConfig
 
 
 @dataclass(slots=True)
@@ -21,11 +30,26 @@ class ReplayConfig:
         fps: Target playback / export frame rate.
         loop: Whether to restart at end of stream (interactive mode).
         export_path: If set, render offscreen and encode to this video path.
+        width: Render width in pixels.
+        height: Render height in pixels.
+        colormap: Initial colormap name.
+        color_mode: Initial colour mapping (``speed``/``heading``/``uniform``).
+        crf: x264 quality for export (lower = better).
+        max_frames: Optional cap on frames decoded (0 = all).
+        auto_speed: Auto-calibrate the colour speed reference from the data.
     """
 
     fps: int = 60
-    loop: bool = False
+    loop: bool = True
     export_path: str | None = None
+    width: int = 1600
+    height: int = 900
+    colormap: str = "turbo"
+    color_mode: str = "speed"
+    crf: int = 18
+    max_frames: int = 0
+    auto_speed: bool = True
+    render: RenderConfig | None = field(default=None)
 
 
 class ReplayEngine:
@@ -36,19 +60,112 @@ class ReplayEngine:
         stream_path: str | os.PathLike[str],
         replay: ReplayConfig,
     ) -> None:
-        """Open the stream and prepare the renderer and camera.
+        """Open the stream, decode frames, and prepare render settings.
 
         Args:
             stream_path: Source ``.bfs`` file to replay.
             replay: Playback configuration.
+
+        Raises:
+            ValueError: If the stream contains no frames.
         """
-        raise NotImplementedError
+        self._replay = replay
+        self._frames = self._load(stream_path, replay.max_frames)
+        if not self._frames:
+            raise ValueError(f"{os.fspath(stream_path)} contains no frames")
+        self._world = self._world_extent(self._frames)
+        self._render = replay.render or self._make_render_config(replay)
+
+    @staticmethod
+    def _load(path: str | os.PathLike[str], max_frames: int) -> list[Frame]:
+        """Decode frames from the stream into memory (optionally capped)."""
+        frames: list[Frame] = []
+        with FrameReader(path) as reader:
+            for frame in reader:
+                frames.append(frame)
+                if max_frames and len(frames) >= max_frames:
+                    break
+        return frames
+
+    @staticmethod
+    def _world_extent(frames: list[Frame]) -> tuple[float, float]:
+        """Estimate world ``(width, height)`` from observed boid positions."""
+        max_x = max(float(f.state.px.max()) for f in frames)
+        max_y = max(float(f.state.py.max()) for f in frames)
+        return (max(max_x, 1.0), max(max_y, 1.0))
+
+    def _speed_reference(self) -> float:
+        """95th-percentile boid speed across a sample of frames.
+
+        Spreads the colour ramp across the flock so most boids are not pinned to
+        the cold end of the map.
+        """
+        sample = self._frames[:: max(1, len(self._frames) // 24)]
+        speeds = [
+            np.sqrt(f.state.vx.astype(np.float64) ** 2 + f.state.vy.astype(np.float64) ** 2)
+            for f in sample
+        ]
+        allv = np.concatenate(speeds)
+        ref = float(np.percentile(allv, 95.0)) if allv.size else 1.0
+        return max(ref, 1.0)
+
+    def _make_render_config(self, replay: ReplayConfig) -> RenderConfig:
+        """Build a :class:`RenderConfig` from the replay settings + data stats."""
+        cfg = RenderConfig(
+            width=replay.width,
+            height=replay.height,
+            colormap=replay.colormap,
+            color_mode=ColorMode[replay.color_mode.upper()],
+        )
+        if replay.auto_speed:
+            cfg.speed_ref = self._speed_reference()
+        return cfg
 
     def run(self) -> None:
-        """Play the stream to completion (or until the window is closed).
+        """Play the stream interactively, or render it to video if exporting.
 
-        Reads frames in order, advancing the camera and rendering each. When
-        :attr:`ReplayConfig.export_path` is set, frames are encoded to video
-        instead of shown interactively.
+        When :attr:`ReplayConfig.export_path` is set, frames are encoded to a
+        video file offscreen; otherwise an interactive window opens.
         """
-        raise NotImplementedError
+        if self._replay.export_path:
+            self._run_export(self._replay.export_path)
+        else:
+            self._run_interactive()
+
+    def _run_interactive(self) -> None:
+        """Launch the windowed, live-tunable player."""
+        from boidforge.viz.app import InteractiveApp
+
+        app = InteractiveApp(
+            self._frames,
+            self._render,
+            self._world,
+            fps=self._replay.fps,
+            loop=self._replay.loop,
+        )
+        app.run()
+
+    def _run_export(self, path: str) -> None:
+        """Render every frame offscreen and encode it to ``path``."""
+        from boidforge.viz.camera import Camera
+        from boidforge.viz.renderer import Renderer
+        from boidforge.viz.video import VideoExporter
+
+        max_n = max(f.state.n for f in self._frames)
+        renderer = Renderer(self._render, ctx=None, max_boids=max_n)
+        camera = Camera()
+        camera.frame_world(self._world[0], self._world[1], self._render.width, self._render.height)
+        try:
+            with VideoExporter(
+                path,
+                self._render.width,
+                self._render.height,
+                fps=self._replay.fps,
+                crf=self._replay.crf,
+            ) as video:
+                for frame in self._frames:
+                    camera.update(frame.state)
+                    renderer.draw(frame.state, camera, present=False)
+                    video.write_frame(renderer.read_pixels())
+        finally:
+            renderer.release()
