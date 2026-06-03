@@ -83,7 +83,7 @@ def benchmark_main(argv: Sequence[str] | None = None) -> int:
         "--backends", nargs="+", default=sorted(SOLVERS), choices=sorted(SOLVERS)
     )
     parser.add_argument(
-        "-n", "--boids", nargs="+", type=int, default=[100, 200, 500, 1000]
+        "-n", "--boids", nargs="+", type=int, default=[100, 200, 500, 1000, 2000]
     )
     parser.add_argument("-s", "--steps", type=int, default=200)
     parser.add_argument("--warmup", type=int, default=10)
