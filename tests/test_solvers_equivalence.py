@@ -2,11 +2,11 @@
 
 The naive backend (L1) is ground truth. These tests advance each backend from
 the same seeded initial state and assert bit-identical buffers every step. L2
-(vectorized NumPy) is implemented and gated equal here; L3 (spatial hash) and
-L4 (native) are expected to xfail until implemented. This is the correctness
-gate referenced in ``CLAUDE.md`` §3. The L1 tests below pin the reference
-behaviour (determinism, speed clamp, in-bounds, readable stream) that every
-other backend must match.
+(vectorized NumPy) and L3 (uniform-grid spatial hash) are implemented and gated
+equal here; L4 (native) is expected to xfail until implemented. This is the
+correctness gate referenced in ``CLAUDE.md`` §3. The L1 tests below pin the
+reference behaviour (determinism, speed clamp, in-bounds, readable stream) that
+every other backend must match.
 """
 
 from __future__ import annotations
@@ -93,19 +93,21 @@ def test_l1_run_writes_readable_stream(tmp_path: Path) -> None:
         assert reader.read_frame() is None
 
 
+@pytest.mark.parametrize("backend", ["vectorized-l2", "spatial-hash-l3"])
 @pytest.mark.parametrize("boundary", [BoundaryMode.WRAP, BoundaryMode.REFLECT])
 @pytest.mark.parametrize("n_boids", [1, 2, 64, 512])
-def test_vectorized_l2_matches_naive(n_boids: int, boundary: BoundaryMode) -> None:
-    """L2 (vectorized NumPy) reproduces the L1 reference bit-for-bit each step.
+def test_backend_matches_naive(backend: str, n_boids: int, boundary: BoundaryMode) -> None:
+    """An accelerated backend reproduces the L1 reference bit-for-bit each step.
 
-    This is the determinism gate for the vectorized backend: identical
-    ``float32`` buffers after every timestep, across both boundary modes and
-    from a single boid up to a populated flock.
+    This is the determinism gate for the implemented accelerated backends (L2
+    vectorized NumPy, L3 uniform-grid spatial hash): identical ``float32``
+    buffers after every timestep, across both boundary modes and from a single
+    boid up to a populated flock.
     """
     cfg = SimulationConfig(n_boids=n_boids, steps=25, seed=1234, boundary=boundary)
 
     ref = NaiveSolver(cfg)
-    other = SOLVERS["vectorized-l2"](cfg)
+    other = SOLVERS[backend](cfg)
     ref_state = ref.initialize()
     other_state = other.initialize()
 
@@ -124,15 +126,14 @@ def test_vectorized_l2_matches_naive(n_boids: int, boundary: BoundaryMode) -> No
             )
 
 
-@pytest.mark.parametrize("backend", ["spatial-hash-l3", "native-l4"])
 @pytest.mark.parametrize("n_boids", [64, 512])
 @pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="skeleton")
-def test_backend_matches_naive(backend: str, n_boids: int) -> None:
-    """An accelerated backend matches the naive reference bit-for-bit."""
+def test_native_l4_matches_naive(n_boids: int) -> None:
+    """L4 (native) will match the naive reference bit-for-bit once implemented."""
     cfg = SimulationConfig(n_boids=n_boids, steps=20, seed=1234)
 
     ref = NaiveSolver(cfg)
-    other = SOLVERS[backend](cfg)
+    other = SOLVERS["native-l4"](cfg)
     ref_state = ref.initialize()
     other_state = other.initialize()
 
