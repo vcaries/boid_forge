@@ -1,10 +1,11 @@
-"""Abstract solver interface and the record-to-disk run loop.
+"""Abstract solver interface, deterministic seeding, and the run loop.
 
-Every backend subclasses :class:`Solver` and implements two methods:
-:meth:`Solver.initialize` (seed the SoA state deterministically from the config)
-and :meth:`Solver.step` (advance the state one timestep in place). The concrete
-:meth:`Solver.run` wires a solver to a :class:`~boidforge.io.writer.FrameWriter`
-— this is the entire compute pipeline and contains no rendering.
+Every backend subclasses :class:`Solver` and implements :meth:`Solver.step`
+(advance the SoA state one timestep in place). Initial-state seeding is provided
+*concretely* by :meth:`Solver.initialize` so that all backends start from a
+bit-identical state derived solely from ``config.seed`` — a precondition of the
+cross-level determinism contract. The concrete :meth:`Solver.run` wires a solver
+to a :class:`~boidforge.io.writer.FrameWriter`; it contains no rendering.
 """
 
 from __future__ import annotations
@@ -12,18 +13,21 @@ from __future__ import annotations
 import abc
 import os
 
+import numpy as np
+
 from boidforge.core.config import SimulationConfig
 from boidforge.core.state import SimulationState
+from boidforge.core.types import DTYPE
 from boidforge.io.writer import FrameWriter
 
 
 class Solver(abc.ABC):
     """Base class for all boid simulation backends.
 
-    Subclasses set the class attribute :attr:`name` and implement
-    :meth:`initialize` and :meth:`step`. The three boid rules, integration,
-    speed clamping, and boundary handling are defined by the config and must be
-    applied identically across backends to satisfy the determinism contract.
+    Subclasses set the class attribute :attr:`name` and implement :meth:`step`.
+    The three boid rules, integration, speed clamping, and boundary handling are
+    defined by the config and must be applied identically across backends to
+    satisfy the determinism contract.
 
     Attributes:
         name: Stable backend identifier (e.g. ``"naive-l1"``).
@@ -40,24 +44,35 @@ class Solver(abc.ABC):
         """
         self.config = config
 
-    @abc.abstractmethod
     def initialize(self) -> SimulationState:
-        """Create the seeded initial state.
+        """Create the seeded initial state (shared by every backend).
 
-        Positions and velocities are a pure function of ``config.seed`` and
-        ``config.n_boids`` so that every backend starts identically.
+        Positions are drawn uniformly over the world rectangle; velocities are
+        drawn with uniform heading and uniform speed in ``[min_speed,
+        max_speed]``. All draws come from a PCG64 generator seeded only by
+        ``config.seed`` and in a fixed order, so the initial state is identical
+        across L1/L2/L3 and across machines. Buffers are cast to ``float32``.
 
         Returns:
             A freshly allocated, seeded :class:`SimulationState`.
         """
-        raise NotImplementedError
+        cfg = self.config
+        rng = np.random.default_rng(cfg.seed)
+        px = rng.uniform(0.0, cfg.world_width, cfg.n_boids).astype(DTYPE)
+        py = rng.uniform(0.0, cfg.world_height, cfg.n_boids).astype(DTYPE)
+        heading = rng.uniform(0.0, 2.0 * np.pi, cfg.n_boids)
+        speed = rng.uniform(cfg.min_speed, cfg.max_speed, cfg.n_boids)
+        vx = (speed * np.cos(heading)).astype(DTYPE)
+        vy = (speed * np.sin(heading)).astype(DTYPE)
+        return SimulationState(px=px, py=py, vx=vx, vy=vy)
 
     @abc.abstractmethod
     def step(self, state: SimulationState) -> None:
         """Advance ``state`` by one timestep, in place.
 
-        Applies separation, alignment, and cohesion, clamps speed, integrates
-        position by ``config.dt``, and applies the boundary mode.
+        Applies separation, alignment, and cohesion, clamps steering force,
+        integrates velocity then position by ``config.dt``, and applies the
+        boundary mode.
 
         Args:
             state: The state to mutate.

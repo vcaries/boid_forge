@@ -99,7 +99,20 @@ class StreamHeader:
         Returns:
             Exactly :data:`HEADER_SIZE` bytes.
         """
-        raise NotImplementedError
+        return struct.pack(
+            HEADER_STRUCT,
+            MAGIC,
+            self.version,
+            self.flags,
+            self.dim,
+            self.dtype_code,
+            b"\x00\x00",
+            self.max_boids,
+            self.dt,
+            self.seed,
+            self.frame_count,
+            b"\x00\x00\x00\x00",
+        )
 
     @classmethod
     def parse(cls, raw: bytes) -> StreamHeader:
@@ -112,6 +125,36 @@ class StreamHeader:
             The parsed :class:`StreamHeader`.
 
         Raises:
-            ValueError: If the magic, version, or dtype is unsupported.
+            ValueError: If the size, magic, version, or dtype is unsupported.
         """
-        raise NotImplementedError
+        if len(raw) != HEADER_SIZE:
+            raise ValueError(f"header must be {HEADER_SIZE} bytes, got {len(raw)}")
+        (
+            magic,
+            version,
+            flags,
+            dim,
+            dtype_code,
+            _reserved,
+            max_boids,
+            dt,
+            seed,
+            frame_count,
+            _reserved2,
+        ) = struct.unpack(HEADER_STRUCT, raw)
+        if magic != MAGIC:
+            raise ValueError(f"not a BoidForge stream (bad magic {magic!r})")
+        if version != FORMAT_VERSION:
+            raise ValueError(f"unsupported format version {version}")
+        if dtype_code != DTYPE_CODE_FLOAT32:
+            raise ValueError(f"unsupported dtype code {dtype_code}")
+        return cls(
+            version=version,
+            flags=flags,
+            dim=dim,
+            dtype_code=dtype_code,
+            max_boids=max_boids,
+            dt=dt,
+            seed=seed,
+            frame_count=frame_count,
+        )
