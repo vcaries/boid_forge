@@ -45,4 +45,9 @@ benchmarks/results/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# ---- Knowledge Graph (graphify) ----
+# Graph is regenerated locally; don't commit cache files or temp extractions
+graphify-out/
+.claude
 CLAUDE.md
