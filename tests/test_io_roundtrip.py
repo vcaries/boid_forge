@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from boidforge.core.config import SimulationConfig
 from boidforge.core.state import SimulationState

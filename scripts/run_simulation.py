@@ -5,7 +5,7 @@ Thin wrapper around :func:`boidforge.cli.simulate_main`. Equivalent to the
 installed ``boidforge-simulate`` console script.
 
 Example:
-    python scripts/run_simulation.py --backend native-l3 --boids 50000 \
+    python scripts/run_simulation.py --backend native-l4 --boids 50000 \
         --steps 1200 --out runs/flock.bfs
 """
 

@@ -79,7 +79,7 @@ pip install -e ".[dev]"
 - For everything (visualization + benchmark extras): `pip install -e ".[all]"`.
   The `viz` extra pulls ModernGL/pyglet, which need a GPU/display.
 - **No C compiler yet?** Install without the native extension — the package and
-  the L1/L2 Python solvers do not require it:
+  the L1/L2/L3 Python solvers do not require it:
 
   ```powershell
   pip install -e ".[dev]" --config-settings=cmake.define.BOIDFORGE_BUILD_EXTENSION=OFF
@@ -153,7 +153,7 @@ Use clear, conventional commit prefixes: `feat`, `fix`, `perf`, `refactor`,
 
 ```powershell
 git checkout main
-git merge --no-ff dev -m "Milestone: solver L1/L2/L3 complete"
+git merge --no-ff dev -m "Milestone: solver L1/L2/L3/L4 complete"
 
 # Annotated, semver-style tag
 git tag -a v0.1.0 -m "v0.1.0 — solver reference + spatial hash + native kernel"

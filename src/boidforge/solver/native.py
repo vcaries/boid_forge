@@ -1,10 +1,10 @@
-"""L3 — native CPython C-extension solver (main performance target).
+"""L4 — native CPython C-extension solver (main performance target).
 
 This backend is a thin Python wrapper. It seeds state, then hands the four
 contiguous ``float32`` SoA buffers to the C kernel in :mod:`boidforge._native`,
 which performs the uniform-grid update in C with the GIL released and no
 per-step allocation. The wrapper holds no physics itself; the algorithm lives in
-``native/``. Output must match L1/L2 bit-for-bit.
+``native/``. Output must match L1/L2/L3 bit-for-bit.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from boidforge.solver.base import Solver
 class NativeSolver(Solver):
     """C-extension solver targeting 10k–100k boids, ~``O(N·k)`` per timestep."""
 
-    name = "native-l3"
+    name = "native-l4"
 
     def initialize(self) -> SimulationState:
         """Seed initial state identically to the reference backend.

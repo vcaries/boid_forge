@@ -27,10 +27,10 @@ dependency and to make every render a *deterministic replay* of recorded data.
 src/boidforge/
   core/        config, simulation state (SoA), shared types/constants
   io/          binary .bfs format: writer + reader (the cross-subsystem contract)
-  solver/      L1 naive, L2 spatial-hash, L3 native — all behind one interface
+  solver/      L1 naive, L2 vectorized, L3 spatial-hash, L4 native — one interface
   benchmark/   timing harness + matplotlib plotting (scaling, speedup)
   viz/         replay engine, ModernGL renderer, camera, FFmpeg video export
-native/        CPython C extension (SoA kernel) for L3, built via CMake
+native/        CPython C extension (SoA kernel) for L4, built via CMake
 ```
 
 ---
@@ -54,17 +54,20 @@ The solver owns a `SimulationState` (Struct-of-Arrays: `px, py, vx, vy`,
 then clamps speed to `[min_speed, max_speed]`, integrates position by `dt`, and
 applies boundary behavior (wrap or reflect, per config).
 
-Three interchangeable backends implement the identical update:
+Four interchangeable backends implement the identical update:
 
 | Level | Module                          | Neighbor search        | Complexity |
 |-------|---------------------------------|------------------------|------------|
-| L1    | `solver/naive.py`               | all-pairs              | O(N²)      |
-| L2    | `solver/spatial_hash.py`        | uniform grid buckets   | ~O(N·k)    |
-| L3    | `solver/native.py` → `_native`  | uniform grid in C      | ~O(N·k)    |
+| L1    | `solver/naive.py`               | all-pairs (Python loop)| O(N²)      |
+| L2    | `solver/vectorized.py`          | all-pairs (NumPy)      | O(N²)      |
+| L3    | `solver/spatial_hash.py`        | uniform grid buckets   | ~O(N·k)    |
+| L4    | `solver/native.py` → `_native`  | uniform grid in C      | ~O(N·k)    |
 
-L1 is the correctness reference. L2 and L3 must match it bit-for-bit under the
-determinism contract (§6). The C extension is the production target for
-10k–100k boids.
+L1 is the correctness reference. L2/L3/L4 must match it bit-for-bit under the
+determinism contract (§6). L2 is the same all-pairs algorithm as L1 re-expressed
+with NumPy broadcasting — it isolates the speedup attributable to vectorization
+alone, at the cost of O(N²) memory for the pairwise matrices. The C extension is
+the production target for 10k–100k boids.
 
 The solver layer imports nothing from `viz` and contains no rendering logic.
 
@@ -188,12 +191,17 @@ import it without coupling to each other. The layering guard test
 
 ## 6. Determinism contract
 
-Identical `(SimulationConfig, seed)` ⇒ identical `.bfs` bytes across L1/L2/L3
-and across machines. To hold this:
+Identical `(SimulationConfig, seed)` ⇒ identical `.bfs` bytes across all
+backends and across machines. To hold this:
 
 - All state and arithmetic in `float32`; reductions accumulated in a fixed
   order. Neighbor contributions are summed in ascending boid-index order so
   floating-point non-associativity cannot reorder results between backends.
+  This constrains vectorization: each boid's reduction is a `np.sum`/`np.mean`
+  over its *compacted* neighbor list, never a reduction over a zero-padded
+  pairwise row (which would regroup the additions and diverge in the last ULP).
+  L2 therefore vectorizes the geometry and clamps but keeps the per-boid
+  reduction loop.
 - RNG is seeded solely from `config.seed`; initial positions/velocities are a
   pure function of the seed and `N`.
 - No wall-clock, hostname, hash-seed, set/dict iteration, or thread-scheduling
@@ -201,7 +209,7 @@ and across machines. To hold this:
 - Boundary handling, speed clamping, and rule weights are config-driven
   constants, not literals scattered in backends.
 
-`tests/test_solvers_equivalence.py` runs all three backends for several
+`tests/test_solvers_equivalence.py` runs each implemented backend for several
 `(N, seed)` and asserts identical output frames.
 
 ---
@@ -212,7 +220,7 @@ and across machines. To hold this:
 
 - per-frame execution time (ms) and FPS-equivalent (`1000 / ms`),
 - scaling of time vs `N`,
-- speedup ratios L1→L2→L3.
+- speedup ratios relative to the L1 baseline (L1→L2→L3→L4).
 
 Results export to a structured file (CSV/JSON); `benchmark/plots.py` renders
 matplotlib figures (time-vs-N on log axes, speedup bars). Benchmark artifacts

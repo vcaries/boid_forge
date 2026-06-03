@@ -49,7 +49,7 @@ static PyMethodDef bf_methods[] = {
 
 PyDoc_STRVAR(
     module_doc,
-    "Native CPython kernel for BoidForge (L3 backend).\n"
+    "Native CPython kernel for BoidForge (L4 backend).\n"
     "Operates on contiguous float32 Struct-of-Arrays buffers; contains no I/O\n"
     "and no rendering.");
 
