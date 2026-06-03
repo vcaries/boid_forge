@@ -15,7 +15,7 @@ import numpy.typing as npt
 
 #: Element type for all boid state and on-disk payloads. IEEE-754 single
 #: precision is the format and determinism contract; do not widen casually.
-DTYPE: np.dtype = np.dtype(np.float32)
+DTYPE: np.dtype[np.float32] = np.dtype(np.float32)
 
 #: Spatial dimensionality of the simulation (2D).
 DIM: int = 2

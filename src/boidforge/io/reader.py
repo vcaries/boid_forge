@@ -9,12 +9,23 @@ computed.
 from __future__ import annotations
 
 import os
+import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
 from types import TracebackType
+from typing import BinaryIO
+
+import numpy as np
 
 from boidforge.core.state import SimulationState
-from boidforge.io.format import StreamHeader
+from boidforge.core.types import DTYPE, FloatArray
+from boidforge.io.format import (
+    FRAME_HEADER_SIZE,
+    FRAME_HEADER_STRUCT,
+    HEADER_SIZE,
+    StreamHeader,
+    frame_size,
+)
 
 
 @dataclass(slots=True)
@@ -49,7 +60,9 @@ class FrameReader:
         Raises:
             ValueError: If the header magic/version/dtype is unsupported.
         """
-        raise NotImplementedError
+        self._fh: BinaryIO = open(path, "rb")
+        self._header = StreamHeader.parse(self._fh.read(HEADER_SIZE))
+        self._closed = False
 
     @property
     def header(self) -> StreamHeader:
@@ -58,7 +71,15 @@ class FrameReader:
         Returns:
             The :class:`StreamHeader` read at open time.
         """
-        raise NotImplementedError
+        return self._header
+
+    def _read_component(self, n: int) -> FloatArray:
+        """Read one ``float32[n]`` SoA component from the current position."""
+        nbytes = n * DTYPE.itemsize
+        buf = self._fh.read(nbytes)
+        if len(buf) < nbytes:
+            raise ValueError("truncated frame payload")
+        return np.frombuffer(buf, dtype=DTYPE)
 
     def read_frame(self) -> Frame | None:
         """Read the next frame in sequence.
@@ -66,19 +87,37 @@ class FrameReader:
         Returns:
             The next :class:`Frame`, or ``None`` at end of stream.
         """
-        raise NotImplementedError
+        hdr = self._fh.read(FRAME_HEADER_SIZE)
+        if not hdr:
+            return None
+        if len(hdr) < FRAME_HEADER_SIZE:
+            raise ValueError("truncated frame header")
+        timestep, n = struct.unpack(FRAME_HEADER_STRUCT, hdr)
+        state = SimulationState(
+            px=self._read_component(n),
+            py=self._read_component(n),
+            vx=self._read_component(n),
+            vy=self._read_component(n),
+        )
+        return Frame(timestep=timestep, state=state)
 
     def seek_frame(self, index: int) -> None:
         """Position the stream at frame ``index``.
 
-        Uses the sidecar ``.bfx`` index when present; otherwise walks frame
-        headers from the current position. Random seeking is a visualizer
-        convenience and never required for sequential replay.
+        Uses fixed-stride arithmetic when the header records a ``max_boids``
+        bound (every frame is the same size, as produced by this package's
+        writer). Variable-length streams would require a ``.bfx`` index.
 
         Args:
             index: Zero-based frame index to seek to.
+
+        Raises:
+            NotImplementedError: If the stream has no fixed frame stride.
         """
-        raise NotImplementedError
+        if self._header.max_boids <= 0:
+            raise NotImplementedError("seek requires a fixed max_boids or a .bfx index")
+        stride = frame_size(self._header.max_boids)
+        self._fh.seek(HEADER_SIZE + index * stride)
 
     def __iter__(self) -> Iterator[Frame]:
         """Iterate frames from the current position to end of stream.
@@ -86,11 +125,17 @@ class FrameReader:
         Yields:
             Each decoded :class:`Frame` in order.
         """
-        raise NotImplementedError
+        while True:
+            frame = self.read_frame()
+            if frame is None:
+                return
+            yield frame
 
     def close(self) -> None:
         """Close the underlying file."""
-        raise NotImplementedError
+        if not self._closed:
+            self._fh.close()
+            self._closed = True
 
     def __enter__(self) -> FrameReader:
         """Enter the context manager.

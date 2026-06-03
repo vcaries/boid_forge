@@ -9,11 +9,20 @@ repacking. The writer performs no physics and no rendering.
 from __future__ import annotations
 
 import os
+import struct
 from types import TracebackType
+from typing import BinaryIO
 
 from boidforge.core.config import SimulationConfig
 from boidforge.core.state import SimulationState
-from boidforge.io.format import StreamHeader
+from boidforge.io.format import (
+    FRAME_HEADER_STRUCT,
+    HEADER_SIZE,
+    StreamHeader,
+)
+
+# Byte offset of the int32 ``frame_count`` field within the global header.
+_FRAME_COUNT_OFFSET = 24
 
 
 class FrameWriter:
@@ -38,7 +47,16 @@ class FrameWriter:
             config: Run configuration; supplies ``dt``, ``seed``, and the
                 ``max_boids`` bound recorded in the header.
         """
-        raise NotImplementedError
+        self._header = StreamHeader(
+            max_boids=config.n_boids,
+            dt=float(config.dt),
+            seed=int(config.seed),
+            frame_count=-1,
+        )
+        self._frames = 0
+        self._closed = False
+        self._fh: BinaryIO = open(path, "wb")
+        self._fh.write(self._header.pack())
 
     def write(self, timestep: int, state: SimulationState) -> None:
         """Append one frame record for ``state`` at ``timestep``.
@@ -50,7 +68,14 @@ class FrameWriter:
             timestep: Monotonic timestep index for this frame.
             state: Current simulation state to snapshot.
         """
-        raise NotImplementedError
+        self._fh.write(struct.pack(FRAME_HEADER_STRUCT, int(timestep), state.n))
+        # Component-major (SoA): each array is already C-contiguous float32,
+        # so tobytes() is a straight memory dump with no repacking.
+        self._fh.write(state.px.tobytes())
+        self._fh.write(state.py.tobytes())
+        self._fh.write(state.vx.tobytes())
+        self._fh.write(state.vy.tobytes())
+        self._frames += 1
 
     @property
     def frames_written(self) -> int:
@@ -59,19 +84,27 @@ class FrameWriter:
         Returns:
             The running frame count.
         """
-        raise NotImplementedError
+        return self._frames
 
     def close(self) -> None:
         """Back-patch ``frame_count`` into the header and close the file."""
-        raise NotImplementedError
+        if self._closed:
+            return
+        self._fh.flush()
+        self._fh.seek(_FRAME_COUNT_OFFSET)
+        self._fh.write(struct.pack("<i", self._frames))
+        self._header.frame_count = self._frames
+        self._fh.close()
+        self._closed = True
 
     def header(self) -> StreamHeader:
         """Return the header currently associated with this stream.
 
         Returns:
-            The :class:`StreamHeader` written at open time.
+            The :class:`StreamHeader` written at open time (``frame_count`` is
+            updated after :meth:`close`).
         """
-        raise NotImplementedError
+        return self._header
 
     def __enter__(self) -> FrameWriter:
         """Enter the context manager.
@@ -89,3 +122,7 @@ class FrameWriter:
     ) -> None:
         """Close the stream on context exit."""
         self.close()
+
+
+# Re-export so callers can compute frame strides without importing format.
+__all__ = ["FrameWriter", "HEADER_SIZE"]
