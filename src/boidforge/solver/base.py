@@ -51,7 +51,7 @@ class Solver(abc.ABC):
         drawn with uniform heading and uniform speed in ``[min_speed,
         max_speed]``. All draws come from a PCG64 generator seeded only by
         ``config.seed`` and in a fixed order, so the initial state is identical
-        across L1/L2/L3 and across machines. Buffers are cast to ``float32``.
+        across all backends and across machines. Buffers are cast to ``float32``.
 
         Returns:
             A freshly allocated, seeded :class:`SimulationState`.

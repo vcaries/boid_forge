@@ -17,9 +17,10 @@ share only the binary format contract defined in
 
 | Level | Backend                          | Complexity | Target scale  |
 |-------|----------------------------------|------------|---------------|
-| L1    | Naive Python                     | O(N²)      | ≤ 2k boids    |
-| L2    | Uniform-grid spatial hash (Py)   | ~O(N)      | ≤ 20k boids   |
-| L3    | CPython C extension (SoA kernel) | ~O(N)      | 10k–100k boids|
+| L1    | Naive Python (all-pairs loop)    | O(N²)      | ≤ 2k boids    |
+| L2    | Vectorized NumPy (all-pairs)     | O(N²)      | ≤ 2k boids    |
+| L3    | Uniform-grid spatial hash (Py)   | ~O(N)      | ≤ 20k boids   |
+| L4    | CPython C extension (SoA kernel) | ~O(N)      | 10k–100k boids|
 
 All levels are required to produce **bit-reproducible** results for identical
 configuration and seed (see the determinism contract in `docs/architecture.md`).

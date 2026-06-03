@@ -26,7 +26,7 @@ class BenchmarkResult:
     """Timing result for one ``(backend, n_boids)`` measurement.
 
     Attributes:
-        backend: Solver name (e.g. ``"native-l3"``).
+        backend: Solver name (e.g. ``"native-l4"``).
         n_boids: Number of boids simulated.
         steps: Number of timesteps measured.
         ms_per_frame: Mean per-frame wall time in milliseconds.
@@ -137,7 +137,7 @@ class BenchmarkRunner:
 
         Args:
             baseline: Reference backend name (e.g. ``"naive-l1"``).
-            target: Faster backend name (e.g. ``"native-l3"``).
+            target: Faster backend name (e.g. ``"native-l4"``).
 
         Returns:
             Mapping ``n_boids -> (baseline_ms / target_ms)`` for every ``N``

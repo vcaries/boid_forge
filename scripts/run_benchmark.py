@@ -5,7 +5,8 @@ Thin wrapper around :func:`boidforge.cli.benchmark_main`. Equivalent to the
 installed ``boidforge-benchmark`` console script.
 
 Example:
-    python scripts/run_benchmark.py --backends naive-l1 spatial-hash-l2 native-l3 \
+    python scripts/run_benchmark.py \
+        --backends naive-l1 vectorized-l2 spatial-hash-l3 native-l4 \
         --boids 1000 5000 20000 --out benchmarks/results
 """
 

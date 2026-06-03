@@ -1,4 +1,4 @@
-"""L2 — uniform-grid spatial-hash Python solver (~O(N)).
+"""L3 — uniform-grid spatial-hash Python solver (~O(N)).
 
 Boids are bucketed into a uniform grid whose cell size equals
 ``config.neighbor_radius``, so each boid only examines its own and the eight
@@ -16,7 +16,7 @@ from boidforge.solver.base import Solver
 class SpatialHashSolver(Solver):
     """Uniform-grid accelerated solver, ~``O(N·k)`` per timestep."""
 
-    name = "spatial-hash-l2"
+    name = "spatial-hash-l3"
 
     def initialize(self) -> SimulationState:
         """Seed initial state identically to the reference backend.

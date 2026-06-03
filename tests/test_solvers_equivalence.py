@@ -1,10 +1,12 @@
-"""Cross-backend equivalence: L1, L2, and L3 must produce identical results.
+"""Cross-backend equivalence: every backend must reproduce the L1 reference.
 
 The naive backend (L1) is ground truth. These tests advance each backend from
-the same seeded initial state and assert bit-identical buffers every step.
-L2/L3 are expected to xfail until implemented; this is the correctness gate
-referenced in ``CLAUDE.md`` §3. The L1 tests below pin the reference behaviour
-(determinism, speed clamp, in-bounds, readable stream) that L2/L3 must match.
+the same seeded initial state and assert bit-identical buffers every step. L2
+(vectorized NumPy) is implemented and gated equal here; L3 (spatial hash) and
+L4 (native) are expected to xfail until implemented. This is the correctness
+gate referenced in ``CLAUDE.md`` §3. The L1 tests below pin the reference
+behaviour (determinism, speed clamp, in-bounds, readable stream) that every
+other backend must match.
 """
 
 from __future__ import annotations
@@ -21,9 +23,14 @@ from boidforge.io.reader import FrameReader
 from boidforge.solver import SOLVERS, NaiveSolver
 
 
-def test_registry_contains_three_backends() -> None:
-    """The solver registry exposes exactly the three required levels."""
-    assert set(SOLVERS) == {"naive-l1", "spatial-hash-l2", "native-l3"}
+def test_registry_contains_four_backends() -> None:
+    """The solver registry exposes exactly the four required levels."""
+    assert set(SOLVERS) == {
+        "naive-l1",
+        "vectorized-l2",
+        "spatial-hash-l3",
+        "native-l4",
+    }
 
 
 def _advance(cfg: SimulationConfig) -> SimulationState:
@@ -86,7 +93,38 @@ def test_l1_run_writes_readable_stream(tmp_path: Path) -> None:
         assert reader.read_frame() is None
 
 
-@pytest.mark.parametrize("backend", ["spatial-hash-l2", "native-l3"])
+@pytest.mark.parametrize("boundary", [BoundaryMode.WRAP, BoundaryMode.REFLECT])
+@pytest.mark.parametrize("n_boids", [1, 2, 64, 512])
+def test_vectorized_l2_matches_naive(n_boids: int, boundary: BoundaryMode) -> None:
+    """L2 (vectorized NumPy) reproduces the L1 reference bit-for-bit each step.
+
+    This is the determinism gate for the vectorized backend: identical
+    ``float32`` buffers after every timestep, across both boundary modes and
+    from a single boid up to a populated flock.
+    """
+    cfg = SimulationConfig(n_boids=n_boids, steps=25, seed=1234, boundary=boundary)
+
+    ref = NaiveSolver(cfg)
+    other = SOLVERS["vectorized-l2"](cfg)
+    ref_state = ref.initialize()
+    other_state = other.initialize()
+
+    # Initial seeded state is shared by the base class; confirm before stepping.
+    for comp in ("px", "py", "vx", "vy"):
+        np.testing.assert_array_equal(
+            getattr(ref_state, comp), getattr(other_state, comp)
+        )
+
+    for _ in range(cfg.steps):
+        ref.step(ref_state)
+        other.step(other_state)
+        for comp in ("px", "py", "vx", "vy"):
+            np.testing.assert_array_equal(
+                getattr(ref_state, comp), getattr(other_state, comp)
+            )
+
+
+@pytest.mark.parametrize("backend", ["spatial-hash-l3", "native-l4"])
 @pytest.mark.parametrize("n_boids", [64, 512])
 @pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="skeleton")
 def test_backend_matches_naive(backend: str, n_boids: int) -> None:
