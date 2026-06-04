@@ -40,6 +40,18 @@ def simulate_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--boundary", default="wrap", choices=[m.value for m in BoundaryMode])
     parser.add_argument("--world-width", type=float, default=1920.0)
     parser.add_argument("--world-height", type=float, default=1080.0)
+
+    rules = parser.add_argument_group("boid rules", "Interaction radii, weights, and clamps.")
+    rules.add_argument("--r-sep", type=float, default=12.0, help="Separation radius.")
+    rules.add_argument("--r-ali", type=float, default=30.0, help="Alignment radius.")
+    rules.add_argument("--r-coh", type=float, default=30.0, help="Cohesion radius.")
+    rules.add_argument("--w-sep", type=float, default=1.5, help="Separation weight.")
+    rules.add_argument("--w-ali", type=float, default=1.0, help="Alignment weight.")
+    rules.add_argument("--w-coh", type=float, default=1.0, help="Cohesion weight.")
+    rules.add_argument("--max-speed", type=float, default=180.0, help="Upper speed clamp.")
+    rules.add_argument("--min-speed", type=float, default=40.0, help="Lower speed clamp.")
+    rules.add_argument("--max-force", type=float, default=220.0, help="Per-step steering clamp.")
+
     parser.add_argument("-o", "--out", required=True, help="Destination .bfs path.")
     args = parser.parse_args(argv)
 
@@ -50,6 +62,15 @@ def simulate_main(argv: Sequence[str] | None = None) -> int:
         world_width=args.world_width,
         world_height=args.world_height,
         boundary=BoundaryMode(args.boundary),
+        r_sep=args.r_sep,
+        r_ali=args.r_ali,
+        r_coh=args.r_coh,
+        w_sep=args.w_sep,
+        w_ali=args.w_ali,
+        w_coh=args.w_coh,
+        max_speed=args.max_speed,
+        min_speed=args.min_speed,
+        max_force=args.max_force,
         seed=args.seed,
     )
     solver = SOLVERS[args.backend](cfg)
