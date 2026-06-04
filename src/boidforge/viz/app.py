@@ -38,6 +38,8 @@ class InteractiveApp:
         world: tuple[float, float],
         fps: int = 60,
         loop: bool = True,
+        zoom: float = 1.0,
+        follow: bool = True,
     ) -> None:
         """Open a window, bind the GL context, and wire up controls.
 
@@ -47,6 +49,8 @@ class InteractiveApp:
             world: ``(world_width, world_height)`` for the initial camera fit.
             fps: Target playback frame rate.
             loop: Whether to wrap to the start at the end of the stream.
+            zoom: Multiplier on the fit-to-world zoom (1.0 = whole world).
+            follow: Whether the camera initially tracks the flock.
         """
         if not frames:
             raise ValueError("no frames to replay")
@@ -75,6 +79,8 @@ class InteractiveApp:
         self._renderer = Renderer(config, ctx=self._ctx, max_boids=self._max_n())
         self._camera = Camera()
         self._camera.frame_world(world[0], world[1], fb_w, fb_h)
+        self._camera.zoom *= zoom
+        self._camera.follow = follow
 
         self._panel = ControlPanel(self._build_controls(), self._window.width, self._window.height)
         self._hud = InfoHUD(self._window.height)

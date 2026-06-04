@@ -177,6 +177,34 @@ def replay_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--no-auto-speed", action="store_true", help="Disable colour speed auto-calibration."
     )
+
+    look = parser.add_argument_group(
+        "appearance",
+        "Live-tunable look (mirrors the interactive panel). Each defaults to the "
+        "auto/computed value; pass one to pin it so an export matches what you tuned.",
+    )
+    look.add_argument("--point-size", type=float, default=None, help="Sprite diameter (px).")
+    look.add_argument("--glow", type=float, default=None, help="Sprite halo strength.")
+    look.add_argument("--intensity", type=float, default=None, help="Emission multiplier.")
+    look.add_argument("--trail-decay", type=float, default=None, help="Trail retention 0..1.")
+    look.add_argument(
+        "--bloom", action=argparse.BooleanOptionalAction, default=None, help="Toggle bloom."
+    )
+    look.add_argument("--bloom-strength", type=float, default=None, help="Bloom add-back.")
+    look.add_argument("--bloom-threshold", type=float, default=None, help="Bloom luminance cut.")
+    look.add_argument("--exposure", type=float, default=None, help="HDR exposure.")
+    look.add_argument("--vignette", type=float, default=None, help="Corner darkening 0..1.")
+    look.add_argument("--speed-lo", type=float, default=None, help="Speed at the cold end.")
+    look.add_argument("--speed-hi", type=float, default=None, help="Speed at the hot end.")
+    look.add_argument("--density-cell", type=float, default=None, help="DENSITY-mode cell side.")
+    look.add_argument("--uniform-t", type=float, default=None, help="UNIFORM-mode LUT coord.")
+    look.add_argument("--zoom", type=float, default=1.0, help="Fit-to-world zoom multiplier.")
+    look.add_argument(
+        "--follow",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Camera tracks the flock centre of mass.",
+    )
     args = parser.parse_args(argv)
 
     cfg = ReplayConfig(
@@ -190,6 +218,21 @@ def replay_main(argv: Sequence[str] | None = None) -> int:
         crf=args.crf,
         max_frames=args.max_frames,
         auto_speed=not args.no_auto_speed,
+        point_size=args.point_size,
+        glow=args.glow,
+        intensity=args.intensity,
+        trail_decay=args.trail_decay,
+        bloom=args.bloom,
+        bloom_strength=args.bloom_strength,
+        bloom_threshold=args.bloom_threshold,
+        exposure=args.exposure,
+        vignette=args.vignette,
+        speed_lo=args.speed_lo,
+        speed_hi=args.speed_hi,
+        density_cell=args.density_cell,
+        uniform_t=args.uniform_t,
+        zoom=args.zoom,
+        follow=args.follow,
     )
     engine = ReplayEngine(args.stream, cfg)
     engine.run()

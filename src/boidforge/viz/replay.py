@@ -24,7 +24,12 @@ from boidforge.viz.renderer import ColorMode, RenderConfig
 
 @dataclass(slots=True)
 class ReplayConfig:
-    """Playback settings.
+    """Playback, appearance, and camera settings for replay/export.
+
+    The appearance overrides mirror the live control panel one-for-one. Each is
+    ``None`` by default, meaning "use the computed default / auto-calibration";
+    set one to pin that knob to an exact value so an exported video reproduces
+    what was dialled in interactively.
 
     Attributes:
         fps: Target playback / export frame rate.
@@ -32,11 +37,28 @@ class ReplayConfig:
         export_path: If set, render offscreen and encode to this video path.
         width: Render width in pixels.
         height: Render height in pixels.
-        colormap: Initial colormap name.
-        color_mode: Initial colour mapping (``speed``/``heading``/``uniform``).
+        colormap: Colormap name.
+        color_mode: Colour mapping (``speed``/``heading``/``uniform``/``density``).
         crf: x264 quality for export (lower = better).
         max_frames: Optional cap on frames decoded (0 = all).
-        auto_speed: Auto-calibrate the colour speed reference from the data.
+        auto_speed: Auto-calibrate the colour speed range from the data (unless
+            ``speed_lo``/``speed_hi`` are given explicitly).
+        point_size: Base sprite diameter in pixels.
+        glow: Sprite halo strength.
+        intensity: Overall emission multiplier.
+        trail_decay: Per-frame trail retention in ``[0, 1]``; 0 disables trails.
+        bloom: Whether to apply the bloom pass.
+        bloom_strength: Bloom add-back strength.
+        bloom_threshold: Luminance threshold feeding the bloom.
+        exposure: HDR exposure before tonemapping.
+        vignette: Corner darkening in ``[0, 1]``.
+        speed_lo: Speed mapped to the cold end of the ramp (overrides auto).
+        speed_hi: Speed mapped to the hot end of the ramp (overrides auto).
+        density_cell: Grid cell side for the DENSITY colour mode.
+        uniform_t: Colour-map coordinate for the UNIFORM colour mode.
+        zoom: Multiplier on the fit-to-world camera zoom (1.0 = whole world).
+        follow: Whether the camera tracks the flock centre of mass.
+        render: Fully-built RenderConfig override (bypasses the builder).
     """
 
     fps: int = 60
@@ -49,6 +71,24 @@ class ReplayConfig:
     crf: int = 18
     max_frames: int = 0
     auto_speed: bool = True
+
+    point_size: float | None = None
+    glow: float | None = None
+    intensity: float | None = None
+    trail_decay: float | None = None
+    bloom: bool | None = None
+    bloom_strength: float | None = None
+    bloom_threshold: float | None = None
+    exposure: float | None = None
+    vignette: float | None = None
+    speed_lo: float | None = None
+    speed_hi: float | None = None
+    density_cell: float | None = None
+    uniform_t: float | None = None
+
+    zoom: float = 1.0
+    follow: bool = True
+
     render: RenderConfig | None = field(default=None)
 
 
@@ -117,7 +157,12 @@ class ReplayEngine:
         return (lo, hi)
 
     def _make_render_config(self, replay: ReplayConfig) -> RenderConfig:
-        """Build a :class:`RenderConfig` from the replay settings + data stats."""
+        """Build a :class:`RenderConfig` from settings, data stats, and overrides.
+
+        Order: start from the defaults, auto-calibrate the speed range and a
+        data-scaled density cell, then apply any explicit appearance overrides
+        from ``replay`` so a flag always wins over the auto value.
+        """
         cfg = RenderConfig(
             width=replay.width,
             height=replay.height,
@@ -129,6 +174,26 @@ class ReplayEngine:
         # A density cell of roughly the neighbour spacing gives a readable
         # crowding field; tie it to the world so it scales with the simulation.
         cfg.density_cell = max(min(self._world) / 60.0, 1.0)
+
+        # Apply explicit appearance overrides (each None unless the user set it).
+        for field_name in (
+            "point_size",
+            "glow",
+            "intensity",
+            "trail_decay",
+            "bloom",
+            "bloom_strength",
+            "bloom_threshold",
+            "exposure",
+            "vignette",
+            "speed_lo",
+            "speed_hi",
+            "density_cell",
+            "uniform_t",
+        ):
+            value = getattr(replay, field_name)
+            if value is not None:
+                setattr(cfg, field_name, value)
         return cfg
 
     def run(self) -> None:
@@ -152,6 +217,8 @@ class ReplayEngine:
             self._world,
             fps=self._replay.fps,
             loop=self._replay.loop,
+            zoom=self._replay.zoom,
+            follow=self._replay.follow,
         )
         app.run()
 
@@ -165,6 +232,8 @@ class ReplayEngine:
         renderer = Renderer(self._render, ctx=None, max_boids=max_n)
         camera = Camera()
         camera.frame_world(self._world[0], self._world[1], self._render.width, self._render.height)
+        camera.zoom *= self._replay.zoom
+        camera.follow = self._replay.follow
         try:
             with VideoExporter(
                 path,
