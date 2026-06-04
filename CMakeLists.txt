@@ -20,13 +20,22 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
-# Aggressive, portable optimization flags for the hot kernel.
+# Optimization flags for the hot kernel.
+#
+# IMPORTANT: the kernel must stay bit-identical to the NumPy backends (CLAUDE.md
+# §3), which reproduces NumPy's float32 pairwise summation exactly. That forbids
+# fast-math: no reassociation and no FMA contraction, or the carefully ordered
+# sums would re-round. We therefore use *precise* floating point and still keep
+# -O2/-O3 and loop unrolling (which do not change FP results).
 if(MSVC)
-  add_compile_options($<$<CONFIG:Release>:/O2> $<$<CONFIG:Release>:/fp:fast>)
+  add_compile_options(
+    $<$<CONFIG:Release>:/O2>
+    $<$<CONFIG:Release>:/fp:precise>)
 else()
   add_compile_options(
     $<$<CONFIG:Release>:-O3>
-    $<$<CONFIG:Release>:-ffast-math>
+    $<$<CONFIG:Release>:-fno-fast-math>
+    $<$<CONFIG:Release>:-ffp-contract=off>
     $<$<CONFIG:Release>:-funroll-loops>
     -Wall -Wextra)
 endif()

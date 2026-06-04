@@ -93,16 +93,16 @@ def test_l1_run_writes_readable_stream(tmp_path: Path) -> None:
         assert reader.read_frame() is None
 
 
-@pytest.mark.parametrize("backend", ["vectorized-l2", "spatial-hash-l3"])
+@pytest.mark.parametrize("backend", ["vectorized-l2", "spatial-hash-l3", "native-l4"])
 @pytest.mark.parametrize("boundary", [BoundaryMode.WRAP, BoundaryMode.REFLECT])
 @pytest.mark.parametrize("n_boids", [1, 2, 64, 512])
 def test_backend_matches_naive(backend: str, n_boids: int, boundary: BoundaryMode) -> None:
     """An accelerated backend reproduces the L1 reference bit-for-bit each step.
 
-    This is the determinism gate for the implemented accelerated backends (L2
-    vectorized NumPy, L3 uniform-grid spatial hash): identical ``float32``
-    buffers after every timestep, across both boundary modes and from a single
-    boid up to a populated flock.
+    This is the determinism gate for the accelerated backends (L2 vectorized
+    NumPy, L3 uniform-grid spatial hash, L4 native C kernel): identical
+    ``float32`` buffers after every timestep, across both boundary modes and
+    from a single boid up to a populated flock.
     """
     cfg = SimulationConfig(n_boids=n_boids, steps=25, seed=1234, boundary=boundary)
 
@@ -124,23 +124,3 @@ def test_backend_matches_naive(backend: str, n_boids: int, boundary: BoundaryMod
             np.testing.assert_array_equal(
                 getattr(ref_state, comp), getattr(other_state, comp)
             )
-
-
-@pytest.mark.parametrize("n_boids", [64, 512])
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="skeleton")
-def test_native_l4_matches_naive(n_boids: int) -> None:
-    """L4 (native) will match the naive reference bit-for-bit once implemented."""
-    cfg = SimulationConfig(n_boids=n_boids, steps=20, seed=1234)
-
-    ref = NaiveSolver(cfg)
-    other = SOLVERS["native-l4"](cfg)
-    ref_state = ref.initialize()
-    other_state = other.initialize()
-
-    for _ in range(cfg.steps):
-        ref.step(ref_state)
-        other.step(other_state)
-        np.testing.assert_array_equal(ref_state.px, other_state.px)
-        np.testing.assert_array_equal(ref_state.py, other_state.py)
-        np.testing.assert_array_equal(ref_state.vx, other_state.vx)
-        np.testing.assert_array_equal(ref_state.vy, other_state.vy)

@@ -58,11 +58,19 @@ typedef struct {
  * The caller guarantees the four arrays are non-aliasing, contiguous, and of
  * length n. Uses an internal uniform grid for ~O(n) neighbor queries.
  *
- * NOTE: not yet implemented (skeleton). See docs/architecture.md and CLAUDE.md.
+ * Determinism: the neighbor reductions reproduce NumPy's float32 pairwise
+ * summation over the same neighbors taken in ascending boid-index order, so the
+ * output is bit-identical to the L1/L2/L3 Python backends. This requires the
+ * translation unit to be compiled with precise (non-reassociating, non-FMA-
+ * contracting) floating point — see CMakeLists.txt.
+ *
+ * Returns 0 on success, or -1 if a transient workspace allocation failed (in
+ * which case the buffers are left unmodified). No allocation occurs in the
+ * per-boid hot loop.
  */
-void bf_step(int n,
-             float *px, float *py, float *vx, float *vy,
-             const bf_params_t *p);
+int bf_step(int n,
+            float *px, float *py, float *vx, float *vy,
+            const bf_params_t *p);
 
 #ifdef __cplusplus
 }
