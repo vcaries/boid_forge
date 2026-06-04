@@ -25,7 +25,7 @@ from boidforge.viz.camera import Camera
 from boidforge.viz.renderer import ColorMode, RenderConfig, Renderer
 from boidforge.viz.ui import Control, ControlKind, ControlPanel, InfoHUD
 
-_COLOR_MODES = ("speed", "heading", "uniform")
+_COLOR_MODES = ("speed", "heading", "uniform", "density")
 
 
 class InteractiveApp:
@@ -269,7 +269,9 @@ class InteractiveApp:
             fattr("bloom_threshold", 0.0, 2.0),
             fattr("exposure", 0.2, 3.0),
             fattr("vignette", 0.0, 1.0),
-            fattr("speed_ref", 20.0, 400.0, "{:.0f}"),
+            fattr("speed_lo", 0.0, 600.0, "{:.0f}"),
+            fattr("speed_hi", 1.0, 800.0, "{:.0f}"),
+            fattr("density_cell", 4.0, 200.0, "{:.0f}"),
             Control(
                 label="Color By",
                 kind=ControlKind.CHOICE,

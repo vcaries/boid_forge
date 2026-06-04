@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from boidforge.core.state import SimulationState
-from boidforge.core.types import DTYPE
+from boidforge.core.types import DTYPE, FloatArray
 from boidforge.viz import colormaps, shaders
 from boidforge.viz.camera import Camera
 
@@ -32,14 +32,16 @@ class ColorMode(enum.IntEnum):
     """How a boid's colour-map coordinate is derived.
 
     Attributes:
-        SPEED: Map normalized speed to colour (fast boids at the hot end).
+        SPEED: Map speed across the observed ``[speed_lo, speed_hi]`` range.
         HEADING: Map travel direction (angle) to colour.
         UNIFORM: All boids share a single colour-map coordinate.
+        DENSITY: Map local crowding (neighbours per grid cell) to colour.
     """
 
     SPEED = 0
     HEADING = 1
     UNIFORM = 2
+    DENSITY = 3
 
 
 @dataclass(slots=True)
@@ -62,7 +64,10 @@ class RenderConfig:
         colormap: Name of the colour map (see :mod:`boidforge.viz.colormaps`).
         color_mode: What drives boid colour (see :class:`ColorMode`).
         uniform_t: Colour-map coordinate used when ``color_mode`` is UNIFORM.
-        speed_ref: Speed (world units/s) mapped to the top of the speed ramp.
+        speed_lo: Speed (world units/s) mapped to the cold end of the ramp.
+        speed_hi: Speed (world units/s) mapped to the hot end of the ramp.
+        density_cell: Grid cell side (world units) for the DENSITY colour mode;
+            local crowding is the boid count sharing a cell of this size.
         background: RGB base colour the trails settle onto.
     """
 
@@ -81,7 +86,9 @@ class RenderConfig:
     colormap: str = "turbo"
     color_mode: ColorMode = ColorMode.SPEED
     uniform_t: float = 0.6
-    speed_ref: float = 180.0
+    speed_lo: float = 40.0
+    speed_hi: float = 180.0
+    density_cell: float = 36.0
     background: tuple[float, float, float] = field(default=(0.015, 0.02, 0.045))
 
 
@@ -128,13 +135,14 @@ class Renderer:
         self._blur_vao = self._fs_vao(self._blur_prog)
         self._composite_vao = self._fs_vao(self._composite_prog)
 
-        # Dynamic boid vertex buffer (pos.xy, vel.xy interleaved) + scratch.
+        # Dynamic boid vertex buffer (pos.xy, vel.xy, aux interleaved) + scratch.
+        # ``aux`` carries the precomputed normalized density for DENSITY mode.
         self._capacity = max(max_boids, 1)
-        self._scratch = np.zeros((self._capacity, 4), dtype=DTYPE)
-        self._boid_vbo = self._ctx.buffer(reserve=self._capacity * 16, dynamic=True)
+        self._scratch = np.zeros((self._capacity, 5), dtype=DTYPE)
+        self._boid_vbo = self._ctx.buffer(reserve=self._capacity * 20, dynamic=True)
         self._boid_vao = self._ctx.vertex_array(
             self._point_prog,
-            [(self._boid_vbo, "2f 2f", "in_pos", "in_vel")],
+            [(self._boid_vbo, "2f 2f 1f", "in_pos", "in_vel", "in_aux")],
         )
 
         self._lut_tex: moderngl.Texture = self._build_lut(config.colormap)
@@ -305,7 +313,7 @@ class Renderer:
     # -- internal passes ---------------------------------------------------
 
     def _upload(self, state: SimulationState) -> None:
-        """Pack SoA state into the interleaved boid vertex buffer."""
+        """Pack SoA state (and optional density) into the boid vertex buffer."""
         n = state.n
         if n > self._capacity:
             self._grow(n)
@@ -314,18 +322,50 @@ class Renderer:
         s[:n, 1] = state.py
         s[:n, 2] = state.vx
         s[:n, 3] = state.vy
+        if self.config.color_mode is ColorMode.DENSITY:
+            s[:n, 4] = self._density(state)
+        else:
+            s[:n, 4] = 0.0
         self._boid_vbo.write(np.ascontiguousarray(s[:n]).tobytes())
+
+    def _density(self, state: SimulationState) -> FloatArray:
+        """Per-boid local crowding, normalized to ``[0, 1]`` for the colour ramp.
+
+        Crowding is the number of boids sharing the same uniform-grid cell of
+        side :attr:`RenderConfig.density_cell`. The count is rescaled by the 5th
+        and 95th percentiles of the per-boid counts so the ramp spans the actual
+        spread rather than the long tail of the densest cluster.
+
+        Args:
+            state: Current frame state.
+
+        Returns:
+            A ``float32`` array of length ``N`` in ``[0, 1]``.
+        """
+        cell = max(self.config.density_cell, 1e-3)
+        gx = np.floor(state.px.astype(np.float64) / cell).astype(np.int64)
+        gy = np.floor(state.py.astype(np.float64) / cell).astype(np.int64)
+        gx -= gx.min()
+        gy -= gy.min()
+        cell_id = gy * (gx.max() + 1) + gx
+        counts = np.bincount(cell_id)
+        per_boid = counts[cell_id].astype(np.float64)
+        lo = float(np.percentile(per_boid, 5.0))
+        hi = float(np.percentile(per_boid, 95.0))
+        rng = hi - lo if hi > lo else 1.0
+        normalized: FloatArray = np.clip((per_boid - lo) / rng, 0.0, 1.0).astype(DTYPE)
+        return normalized
 
     def _grow(self, n: int) -> None:
         """Grow the vertex buffer and scratch array to hold at least ``n``."""
         self._capacity = 1 << (int(n - 1).bit_length())
-        self._scratch = np.zeros((self._capacity, 4), dtype=DTYPE)
+        self._scratch = np.zeros((self._capacity, 5), dtype=DTYPE)
         self._boid_vao.release()
         self._boid_vbo.release()
-        self._boid_vbo = self._ctx.buffer(reserve=self._capacity * 16, dynamic=True)
+        self._boid_vbo = self._ctx.buffer(reserve=self._capacity * 20, dynamic=True)
         self._boid_vao = self._ctx.vertex_array(
             self._point_prog,
-            [(self._boid_vbo, "2f 2f", "in_pos", "in_vel")],
+            [(self._boid_vbo, "2f 2f 1f", "in_pos", "in_vel", "in_aux")],
         )
 
     def _fade_accum(self) -> None:
@@ -353,7 +393,9 @@ class Renderer:
         self._set(prog, "u_mvp", camera.view_matrix(self._width, self._height))
         self._set(prog, "u_point_size", float(cfg.point_size))
         self._set(prog, "u_min_size", float(cfg.min_point_size))
-        self._set(prog, "u_speed_scale", 1.0 / max(cfg.speed_ref, 1e-3))
+        speed_range = cfg.speed_hi - cfg.speed_lo
+        self._set(prog, "u_speed_lo", float(cfg.speed_lo))
+        self._set(prog, "u_speed_inv_range", 1.0 / (speed_range if speed_range > 1e-3 else 1e-3))
         self._set(prog, "u_color_mode", int(cfg.color_mode))
         self._set(prog, "u_uniform_t", float(cfg.uniform_t))
         self._set(prog, "u_glow", float(cfg.glow))

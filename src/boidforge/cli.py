@@ -168,7 +168,9 @@ def replay_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--width", type=int, default=1600)
     parser.add_argument("--height", type=int, default=900)
     parser.add_argument("--colormap", default="turbo", choices=sorted(available()))
-    parser.add_argument("--color-mode", default="speed", choices=["speed", "heading", "uniform"])
+    parser.add_argument(
+        "--color-mode", default="speed", choices=["speed", "heading", "uniform", "density"]
+    )
     parser.add_argument("--crf", type=int, default=18, help="x264 quality (lower = better).")
     parser.add_argument("--max-frames", type=int, default=0, help="Cap frames decoded (0 = all).")
     parser.add_argument("--no-loop", action="store_true", help="Do not loop in interactive mode.")

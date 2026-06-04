@@ -22,13 +22,15 @@ POINT_VERTEX: str = """
 #version 330
 in vec2 in_pos;
 in vec2 in_vel;
+in float in_aux;   // precomputed normalized density in [0,1] (density mode)
 
 uniform mat4 u_mvp;
-uniform float u_point_size;   // base sprite diameter in pixels
-uniform float u_min_size;     // floor so distant boids stay visible
-uniform float u_speed_scale;  // 1 / max_speed, maps speed -> [0,1]
-uniform int u_color_mode;     // 0 = speed, 1 = heading, 2 = uniform
-uniform float u_uniform_t;    // LUT coordinate when color mode == uniform
+uniform float u_point_size;       // base sprite diameter in pixels
+uniform float u_min_size;         // floor so distant boids stay visible
+uniform float u_speed_lo;         // speed mapped to the cold end of the ramp
+uniform float u_speed_inv_range;  // 1 / (speed_hi - speed_lo)
+uniform int u_color_mode;         // 0 speed, 1 heading, 2 uniform, 3 density
+uniform float u_uniform_t;        // LUT coordinate when color mode == uniform
 
 out float v_t;
 out float v_speed;
@@ -37,13 +39,18 @@ const float TWO_PI = 6.28318530718;
 
 void main() {
     float speed = length(in_vel);
-    float norm = clamp(speed * u_speed_scale, 0.0, 1.0);
+    // Map speed across the *observed* [lo, hi] range so the colour ramp spans
+    // the actual distribution — slow boids land cold, fast boids hot — instead
+    // of all clustering at one end when speeds are tightly clamped.
+    float norm = clamp((speed - u_speed_lo) * u_speed_inv_range, 0.0, 1.0);
 
     if (u_color_mode == 1) {
         float ang = atan(in_vel.y, in_vel.x) / TWO_PI + 0.5;
         v_t = ang;
     } else if (u_color_mode == 2) {
         v_t = u_uniform_t;
+    } else if (u_color_mode == 3) {
+        v_t = clamp(in_aux, 0.0, 1.0);
     } else {
         v_t = norm;
     }

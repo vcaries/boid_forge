@@ -94,11 +94,13 @@ class ReplayEngine:
         max_y = max(float(f.state.py.max()) for f in frames)
         return (max(max_x, 1.0), max(max_y, 1.0))
 
-    def _speed_reference(self) -> float:
-        """95th-percentile boid speed across a sample of frames.
+    def _speed_range(self) -> tuple[float, float]:
+        """The 5th/95th-percentile boid speed across a sample of frames.
 
-        Spreads the colour ramp across the flock so most boids are not pinned to
-        the cold end of the map.
+        Mapping the colour ramp onto this observed range (rather than onto an
+        absolute ``speed/max`` ratio) is what makes slow boids read cold and
+        fast boids hot: tightly clamped flocks still get the full spread of
+        colour instead of collapsing to a single hue.
         """
         sample = self._frames[:: max(1, len(self._frames) // 24)]
         speeds = [
@@ -106,8 +108,13 @@ class ReplayEngine:
             for f in sample
         ]
         allv = np.concatenate(speeds)
-        ref = float(np.percentile(allv, 95.0)) if allv.size else 1.0
-        return max(ref, 1.0)
+        if not allv.size:
+            return (0.0, 1.0)
+        lo = float(np.percentile(allv, 5.0))
+        hi = float(np.percentile(allv, 95.0))
+        if hi - lo < 1e-3:
+            hi = lo + 1.0
+        return (lo, hi)
 
     def _make_render_config(self, replay: ReplayConfig) -> RenderConfig:
         """Build a :class:`RenderConfig` from the replay settings + data stats."""
@@ -118,7 +125,10 @@ class ReplayEngine:
             color_mode=ColorMode[replay.color_mode.upper()],
         )
         if replay.auto_speed:
-            cfg.speed_ref = self._speed_reference()
+            cfg.speed_lo, cfg.speed_hi = self._speed_range()
+        # A density cell of roughly the neighbour spacing gives a readable
+        # crowding field; tie it to the world so it scales with the simulation.
+        cfg.density_cell = max(min(self._world) / 60.0, 1.0)
         return cfg
 
     def run(self) -> None:
