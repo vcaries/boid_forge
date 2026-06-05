@@ -172,7 +172,12 @@ def replay_main(argv: Sequence[str] | None = None) -> int:
         "--color-mode", default="speed", choices=["speed", "heading", "uniform", "density"]
     )
     parser.add_argument("--crf", type=int, default=18, help="x264 quality (lower = better).")
-    parser.add_argument("--max-frames", type=int, default=0, help="Cap frames decoded (0 = all).")
+    parser.add_argument(
+        "--start-frame", type=int, default=0, help="First frame to replay/export (0 = start)."
+    )
+    parser.add_argument(
+        "--max-frames", type=int, default=0, help="Frames to decode from --start-frame (0 = all)."
+    )
     parser.add_argument("--no-loop", action="store_true", help="Do not loop in interactive mode.")
     parser.add_argument(
         "--no-auto-speed", action="store_true", help="Disable colour speed auto-calibration."
@@ -216,6 +221,7 @@ def replay_main(argv: Sequence[str] | None = None) -> int:
         colormap=args.colormap,
         color_mode=args.color_mode,
         crf=args.crf,
+        start_frame=args.start_frame,
         max_frames=args.max_frames,
         auto_speed=not args.no_auto_speed,
         point_size=args.point_size,

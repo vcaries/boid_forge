@@ -41,7 +41,8 @@ class ReplayConfig:
         colormap: Colormap name.
         color_mode: Colour mapping (``speed``/``heading``/``uniform``/``density``).
         crf: x264 quality for export (lower = better).
-        max_frames: Optional cap on frames decoded (0 = all).
+        start_frame: Index of the first frame to replay/export (0 = beginning).
+        max_frames: Optional cap on frames decoded from ``start_frame`` (0 = all).
         auto_speed: Auto-calibrate the colour speed range from the data (unless
             ``speed_lo``/``speed_hi`` are given explicitly).
         point_size: Base sprite diameter in pixels.
@@ -70,6 +71,7 @@ class ReplayConfig:
     colormap: str = "turbo"
     color_mode: str = "speed"
     crf: int = 18
+    start_frame: int = 0
     max_frames: int = 0
     auto_speed: bool = True
 
@@ -116,10 +118,32 @@ class ReplayEngine:
         self._replay = replay
 
     @staticmethod
-    def _load(path: str | os.PathLike[str], max_frames: int) -> list[Frame]:
-        """Decode frames from the stream into memory (optionally capped)."""
+    def _seek_reader(reader: FrameReader, start: int) -> None:
+        """Position ``reader`` at frame ``start`` (fast seek, else skip-read).
+
+        Uses the fixed-stride :meth:`FrameReader.seek_frame` when the stream
+        records a ``max_boids`` bound (this package's writer always does), and
+        falls back to reading and discarding for variable-length streams.
+
+        Args:
+            reader: An open reader positioned at the first frame.
+            start: Zero-based frame index to advance to.
+        """
+        if start <= 0:
+            return
+        try:
+            reader.seek_frame(start)
+        except NotImplementedError:
+            for _ in range(start):
+                if reader.read_frame() is None:
+                    break
+
+    @staticmethod
+    def _load(path: str | os.PathLike[str], start: int, max_frames: int) -> list[Frame]:
+        """Decode frames ``[start, start+max_frames)`` from the stream into memory."""
         frames: list[Frame] = []
         with FrameReader(path) as reader:
+            ReplayEngine._seek_reader(reader, start)
             for frame in reader:
                 frames.append(frame)
                 if max_frames and len(frames) >= max_frames:
@@ -170,13 +194,17 @@ class ReplayEngine:
         Returns:
             ``(world, (speed_lo, speed_hi), max_boids, n_frames)``.
         """
+        start = self._replay.start_frame
         cap = self._replay.max_frames
         with FrameReader(self._path) as reader:
             total = reader.header.frame_count
+            if total > 0:
+                total = max(0, total - start)
             if cap:
                 total = cap if total < 0 else min(total, cap)
             stride = max(1, total // 24) if total > 0 else 1
 
+            self._seek_reader(reader, start)
             max_x = max_y = 1.0
             max_n = 0
             count = 0
@@ -271,9 +299,11 @@ class ReplayEngine:
         """Load the stream into memory and launch the live-tunable player."""
         from boidforge.viz.app import InteractiveApp
 
-        frames = self._load(self._path, self._replay.max_frames)
+        frames = self._load(self._path, self._replay.start_frame, self._replay.max_frames)
         if not frames:
-            raise ValueError(f"{os.fspath(self._path)} contains no frames")
+            raise ValueError(
+                f"{os.fspath(self._path)} has no frames at start_frame={self._replay.start_frame}"
+            )
         world = self._world_extent(frames)
         render = self._replay.render or self._make_render_config(world, self._speed_range(frames))
         app = InteractiveApp(
@@ -307,7 +337,9 @@ class ReplayEngine:
 
         world, srange, max_n, n_frames = self._scan()
         if n_frames == 0:
-            raise ValueError(f"{os.fspath(self._path)} contains no frames")
+            raise ValueError(
+                f"{os.fspath(self._path)} has no frames at start_frame={self._replay.start_frame}"
+            )
         render = self._replay.render or self._make_render_config(world, srange)
 
         renderer = Renderer(render, ctx=None, max_boids=max_n)
@@ -323,6 +355,7 @@ class ReplayEngine:
                 ) as video,
                 FrameReader(self._path) as reader,
             ):
+                self._seek_reader(reader, self._replay.start_frame)
                 for i, frame in enumerate(reader):
                     if cap and i >= cap:
                         break
