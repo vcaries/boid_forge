@@ -17,6 +17,7 @@ import os
 from dataclasses import dataclass, field
 
 import numpy as np
+import numpy.typing as npt
 
 from boidforge.io.reader import Frame, FrameReader
 from boidforge.viz.renderer import ColorMode, RenderConfig
@@ -100,21 +101,19 @@ class ReplayEngine:
         stream_path: str | os.PathLike[str],
         replay: ReplayConfig,
     ) -> None:
-        """Open the stream, decode frames, and prepare render settings.
+        """Bind the engine to a stream and its playback settings.
+
+        Frames are *not* decoded here: interactive playback loads them into
+        memory (it needs random access for scrubbing), while export streams
+        them one at a time so a multi-gigabyte stream does not have to fit in
+        RAM. See :meth:`run`.
 
         Args:
             stream_path: Source ``.bfs`` file to replay.
             replay: Playback configuration.
-
-        Raises:
-            ValueError: If the stream contains no frames.
         """
+        self._path = stream_path
         self._replay = replay
-        self._frames = self._load(stream_path, replay.max_frames)
-        if not self._frames:
-            raise ValueError(f"{os.fspath(stream_path)} contains no frames")
-        self._world = self._world_extent(self._frames)
-        self._render = replay.render or self._make_render_config(replay)
 
     @staticmethod
     def _load(path: str | os.PathLike[str], max_frames: int) -> list[Frame]:
@@ -134,35 +133,92 @@ class ReplayEngine:
         max_y = max(float(f.state.py.max()) for f in frames)
         return (max(max_x, 1.0), max(max_y, 1.0))
 
-    def _speed_range(self) -> tuple[float, float]:
-        """The 5th/95th-percentile boid speed across a sample of frames.
+    @staticmethod
+    def _speed_range(frames: list[Frame]) -> tuple[float, float]:
+        """The 5th/95th-percentile boid speed across a sample of ``frames``.
 
         Mapping the colour ramp onto this observed range (rather than onto an
         absolute ``speed/max`` ratio) is what makes slow boids read cold and
         fast boids hot: tightly clamped flocks still get the full spread of
         colour instead of collapsing to a single hue.
         """
-        sample = self._frames[:: max(1, len(self._frames) // 24)]
+        sample = frames[:: max(1, len(frames) // 24)]
         speeds = [
             np.sqrt(f.state.vx.astype(np.float64) ** 2 + f.state.vy.astype(np.float64) ** 2)
             for f in sample
         ]
-        allv = np.concatenate(speeds)
-        if not allv.size:
+        return ReplayEngine._percentile_range(np.concatenate(speeds) if speeds else np.empty(0))
+
+    @staticmethod
+    def _percentile_range(speeds: npt.NDArray[np.float64]) -> tuple[float, float]:
+        """5th/95th-percentile of a flat speed array, with a non-zero span."""
+        if not speeds.size:
             return (0.0, 1.0)
-        lo = float(np.percentile(allv, 5.0))
-        hi = float(np.percentile(allv, 95.0))
+        lo = float(np.percentile(speeds, 5.0))
+        hi = float(np.percentile(speeds, 95.0))
         if hi - lo < 1e-3:
             hi = lo + 1.0
         return (lo, hi)
 
-    def _make_render_config(self, replay: ReplayConfig) -> RenderConfig:
+    def _scan(self) -> tuple[tuple[float, float], tuple[float, float], int, int]:
+        """Single streaming pass for export: world, speed range, max N, count.
+
+        Reads the stream once without holding it in memory, accumulating the
+        world extent, a sampled speed distribution (stride chosen from the
+        header frame count), the largest boid count, and the number of frames.
+
+        Returns:
+            ``(world, (speed_lo, speed_hi), max_boids, n_frames)``.
+        """
+        cap = self._replay.max_frames
+        with FrameReader(self._path) as reader:
+            total = reader.header.frame_count
+            if cap:
+                total = cap if total < 0 else min(total, cap)
+            stride = max(1, total // 24) if total > 0 else 1
+
+            max_x = max_y = 1.0
+            max_n = 0
+            count = 0
+            sampled: list[npt.NDArray[np.float64]] = []
+            for i, frame in enumerate(reader):
+                if cap and i >= cap:
+                    break
+                st = frame.state
+                max_x = max(max_x, float(st.px.max()))
+                max_y = max(max_y, float(st.py.max()))
+                max_n = max(max_n, st.n)
+                # Cap the speed sample (matters when the header lacks a frame
+                # count, so stride is 1 and we'd otherwise sample every frame).
+                if i % stride == 0 and len(sampled) < 32:
+                    sampled.append(
+                        np.sqrt(st.vx.astype(np.float64) ** 2 + st.vy.astype(np.float64) ** 2)
+                    )
+                count += 1
+
+        world = (max_x, max_y)
+        srange = self._percentile_range(np.concatenate(sampled) if sampled else np.empty(0))
+        return world, srange, max_n, count
+
+    def _make_render_config(
+        self,
+        world: tuple[float, float],
+        speed_range: tuple[float, float],
+    ) -> RenderConfig:
         """Build a :class:`RenderConfig` from settings, data stats, and overrides.
 
         Order: start from the defaults, auto-calibrate the speed range and a
         data-scaled density cell, then apply any explicit appearance overrides
-        from ``replay`` so a flag always wins over the auto value.
+        from the replay config so a flag always wins over the auto value.
+
+        Args:
+            world: ``(width, height)`` world extent from the data.
+            speed_range: ``(lo, hi)`` speed percentiles from the data.
+
+        Returns:
+            The resolved render configuration.
         """
+        replay = self._replay
         cfg = RenderConfig(
             width=replay.width,
             height=replay.height,
@@ -170,10 +226,10 @@ class ReplayEngine:
             color_mode=ColorMode[replay.color_mode.upper()],
         )
         if replay.auto_speed:
-            cfg.speed_lo, cfg.speed_hi = self._speed_range()
+            cfg.speed_lo, cfg.speed_hi = speed_range
         # A density cell of roughly the neighbour spacing gives a readable
         # crowding field; tie it to the world so it scales with the simulation.
-        cfg.density_cell = max(min(self._world) / 60.0, 1.0)
+        cfg.density_cell = max(min(world) / 60.0, 1.0)
 
         # Apply explicit appearance overrides (each None unless the user set it).
         for field_name in (
@@ -199,8 +255,12 @@ class ReplayEngine:
     def run(self) -> None:
         """Play the stream interactively, or render it to video if exporting.
 
-        When :attr:`ReplayConfig.export_path` is set, frames are encoded to a
-        video file offscreen; otherwise an interactive window opens.
+        When :attr:`ReplayConfig.export_path` is set, frames are streamed and
+        encoded to a video file offscreen (low memory); otherwise the stream is
+        loaded into memory and an interactive window opens.
+
+        Raises:
+            ValueError: If the stream contains no frames.
         """
         if self._replay.export_path:
             self._run_export(self._replay.export_path)
@@ -208,13 +268,18 @@ class ReplayEngine:
             self._run_interactive()
 
     def _run_interactive(self) -> None:
-        """Launch the windowed, live-tunable player."""
+        """Load the stream into memory and launch the live-tunable player."""
         from boidforge.viz.app import InteractiveApp
 
+        frames = self._load(self._path, self._replay.max_frames)
+        if not frames:
+            raise ValueError(f"{os.fspath(self._path)} contains no frames")
+        world = self._world_extent(frames)
+        render = self._replay.render or self._make_render_config(world, self._speed_range(frames))
         app = InteractiveApp(
-            self._frames,
-            self._render,
-            self._world,
+            frames,
+            render,
+            world,
             fps=self._replay.fps,
             loop=self._replay.loop,
             zoom=self._replay.zoom,
@@ -223,26 +288,44 @@ class ReplayEngine:
         app.run()
 
     def _run_export(self, path: str) -> None:
-        """Render every frame offscreen and encode it to ``path``."""
+        """Stream every frame from disk, render offscreen, and encode to ``path``.
+
+        Frames are read one at a time so a multi-gigabyte stream never has to
+        be resident in memory — only the current frame plus the renderer's GPU
+        buffers. The stream is scanned once up front for the world extent,
+        speed range, and buffer sizing, then re-read to render.
+
+        Args:
+            path: Destination video file.
+
+        Raises:
+            ValueError: If the stream contains no frames.
+        """
         from boidforge.viz.camera import Camera
         from boidforge.viz.renderer import Renderer
         from boidforge.viz.video import VideoExporter
 
-        max_n = max(f.state.n for f in self._frames)
-        renderer = Renderer(self._render, ctx=None, max_boids=max_n)
+        world, srange, max_n, n_frames = self._scan()
+        if n_frames == 0:
+            raise ValueError(f"{os.fspath(self._path)} contains no frames")
+        render = self._replay.render or self._make_render_config(world, srange)
+
+        renderer = Renderer(render, ctx=None, max_boids=max_n)
         camera = Camera()
-        camera.frame_world(self._world[0], self._world[1], self._render.width, self._render.height)
+        camera.frame_world(world[0], world[1], render.width, render.height)
         camera.zoom *= self._replay.zoom
         camera.follow = self._replay.follow
+        cap = self._replay.max_frames
         try:
-            with VideoExporter(
-                path,
-                self._render.width,
-                self._render.height,
-                fps=self._replay.fps,
-                crf=self._replay.crf,
-            ) as video:
-                for frame in self._frames:
+            with (
+                VideoExporter(
+                    path, render.width, render.height, fps=self._replay.fps, crf=self._replay.crf
+                ) as video,
+                FrameReader(self._path) as reader,
+            ):
+                for i, frame in enumerate(reader):
+                    if cap and i >= cap:
+                        break
                     camera.update(frame.state)
                     renderer.draw(frame.state, camera, present=False)
                     video.write_frame(renderer.read_pixels())

@@ -284,9 +284,10 @@ class Renderer:
             first, length ``width*height*4`` — ready for FFmpeg.
         """
         # GL framebuffers are bottom-row first; flip to top-first for video.
+        # tobytes() emits the flipped view in C order in a single copy.
         raw = self._out_fbo.read(components=4, dtype="f1")
         arr = np.frombuffer(raw, dtype=np.uint8).reshape(self._height, self._width, 4)
-        return np.ascontiguousarray(arr[::-1]).tobytes()
+        return arr[::-1].tobytes()
 
     def release(self) -> None:
         """Release all GPU resources held by this renderer."""
